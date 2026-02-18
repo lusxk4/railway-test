@@ -32,108 +32,100 @@ async function testMagaluAccess() {
     tests: []
   };
 
-  // TESTE 1: Página principal
-  console.log('1️⃣ Testando acesso à página principal...');
-  try {
-    const response = await axios.get('https://www.magazinevoce.com.br/magazinepromoforia/selecao/ofertasdodia/', {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'pt-BR,pt;q=0.9'
-      },
-      timeout: 15000,
-      maxRedirects: 5
-    });
+  const HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Connection': 'keep-alive',
+    'Upgrade-Insecure-Requests': '1'
+  };
 
-    const hasCaptcha = response.data.includes('Captcha Magalu') || 
-                      response.data.includes('az-request-verify') ||
-                      response.data.includes('I\'m not a robot');
-
-    const test1 = {
-      name: 'Página Principal',
-      url: 'https://www.magazinevoce.com.br/magazinepromoforia/selecao/ofertasdodia/',
-      status: response.status,
-      blocked: hasCaptcha,
-      title: response.data.match(/<title>(.*?)<\/title>/)?.[1] || 'N/A'
-    };
-
-    results.tests.push(test1);
-
-    if (hasCaptcha) {
-      console.log('   ❌ BLOQUEADO - Captcha detectado!');
-      console.log(`   Título: ${test1.title}\n`);
-    } else {
-      console.log('   ✅ ACESSO OK!');
-      console.log(`   Título: ${test1.title}\n`);
+  const urlsParaTestar = [
+    {
+      name: 'MagazineVocê - Ofertas do Dia',
+      url: 'https://www.magazinevoce.com.br/magazinepromoforia/selecao/ofertasdodia/'
+    },
+    {
+      name: 'Magazine Luiza - Ofertas do Dia',
+      url: 'https://www.magazineluiza.com.br/selecao/ofertasdodia/'
+    },
+    {
+      name: 'Magazine Luiza - Página Principal',
+      url: 'https://www.magazineluiza.com.br/'
     }
-  } catch (error) {
-    console.log(`   ❌ ERRO: ${error.message}\n`);
-    results.tests.push({
-      name: 'Página Principal',
-      error: error.message,
-      blocked: true
-    });
+  ];
+
+  for (let i = 0; i < urlsParaTestar.length; i++) {
+    const { name, url } = urlsParaTestar[i];
+    console.log(`${i + 1}️⃣ Testando: ${name}`);
+
+    try {
+      const response = await axios.get(url, {
+        headers: HEADERS,
+        timeout: 15000,
+        maxRedirects: 5,
+        validateStatus: () => true // não lança erro em 4xx/5xx
+      });
+
+      const body = typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
+      const title = body.match(/<title[^>]*>(.*?)<\/title>/i)?.[1]?.trim() || 'N/A';
+      const finalUrl = response.request?.res?.responseUrl || url;
+
+      const hasCaptcha =
+        body.toLowerCase().includes('captcha') ||
+        body.includes('az-request-verify') ||
+        body.includes("I'm not a robot") ||
+        title.toLowerCase().includes('captcha');
+
+      const hasProducts =
+        body.includes('"product"') ||
+        body.includes('data-testid') ||
+        body.includes('productList') ||
+        body.includes('"price"');
+
+      const test = {
+        name,
+        url,
+        finalUrl,
+        status: response.status,
+        title,
+        blocked: hasCaptcha || response.status === 403,
+        hasProducts,
+        preview: body.substring(0, 300)
+      };
+
+      results.tests.push(test);
+
+      console.log(`   📊 Status HTTP : ${response.status}`);
+      console.log(`   📍 URL final   : ${finalUrl}`);
+      console.log(`   🏷️  Título      : ${title}`);
+      console.log(`   📄 Preview     : ${body.substring(0, 200).replace(/\s+/g, ' ')}`);
+
+      if (hasCaptcha || response.status === 403) {
+        console.log('   🔴 RESULTADO   : BLOQUEADO (captcha ou 403)\n');
+      } else if (response.status === 404) {
+        console.log('   🟡 RESULTADO   : URL não existe (404)\n');
+      } else if (hasProducts) {
+        console.log('   🟢 RESULTADO   : ACESSO OK - produtos encontrados!\n');
+      } else if (response.status === 200) {
+        console.log('   🟡 RESULTADO   : Status 200, mas sem produtos detectados. Verifique o preview.\n');
+      } else {
+        console.log(`   🟡 RESULTADO   : Status ${response.status} - verifique o preview.\n`);
+      }
+
+    } catch (error) {
+      console.log(`   ❌ ERRO: ${error.message}\n`);
+      results.tests.push({ name, url, error: error.message, blocked: true });
+    }
   }
 
-  // TESTE 2: API Interna
-  console.log('2️⃣ Testando acesso à API interna...');
+  // TESTE IP
+  console.log('🌐 Verificando IP público deste servidor...');
   try {
-    const response = await axios.get('https://www.magazinevoce.com.br/api/catalog/v2/selecao/ofertasdodia', {
-      params: { page: 1, limit: 10 },
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'application/json',
-        'Accept-Language': 'pt-BR,pt;q=0.9',
-        'Referer': 'https://www.magazinevoce.com.br/'
-      },
-      timeout: 15000
-    });
-
-    const isJSON = typeof response.data === 'object';
-    const isArray = Array.isArray(response.data);
-    const hasCaptcha = typeof response.data === 'string' && response.data.includes('Captcha');
-
-    const test2 = {
-      name: 'API Interna',
-      url: 'https://www.magazinevoce.com.br/api/catalog/v2/selecao/ofertasdodia',
-      status: response.status,
-      blocked: hasCaptcha,
-      isJSON: isJSON,
-      isArray: isArray,
-      dataType: typeof response.data,
-      itemsCount: isArray ? response.data.length : 0
-    };
-
-    results.tests.push(test2);
-
-    if (hasCaptcha) {
-      console.log('   ❌ BLOQUEADO - Captcha na API!');
-    } else if (isArray && response.data.length > 0) {
-      console.log(`   ✅ API FUNCIONANDO!`);
-      console.log(`   📦 Retornou ${response.data.length} items`);
-      console.log(`   📋 Tipo: ${isArray ? 'Array' : 'Object'}\n`);
-    } else {
-      console.log(`   ⚠️ API respondeu mas formato inesperado`);
-      console.log(`   Tipo: ${typeof response.data}\n`);
-    }
-  } catch (error) {
-    console.log(`   ❌ ERRO: ${error.message}\n`);
-    results.tests.push({
-      name: 'API Interna',
-      error: error.message,
-      blocked: true
-    });
-  }
-
-  // TESTE 3: IP Público
-  console.log('3️⃣ Verificando IP público deste servidor...');
-  try {
-    const response = await axios.get('https://api.ipify.org?format=json', {
-      timeout: 10000
-    });
-
+    const response = await axios.get('https://api.ipify.org?format=json', { timeout: 10000 });
     results.publicIP = response.data.ip;
-    console.log(`   🌐 IP Público: ${response.data.ip}\n`);
+    console.log(`   IP Público: ${response.data.ip}\n`);
   } catch (error) {
     console.log(`   ⚠️ Não conseguiu verificar IP: ${error.message}\n`);
   }
@@ -145,21 +137,21 @@ async function testMagaluAccess() {
 
   const allBlocked = results.tests.every(t => t.blocked);
   const someBlocked = results.tests.some(t => t.blocked);
+  const anySuccess = results.tests.some(t => !t.blocked && t.status === 200);
 
   if (allBlocked) {
     console.log('❌ TODOS OS TESTES BLOQUEADOS!');
-    console.log('💔 Railway também está na blacklist do Magazine Luiza.');
-    console.log('🔄 Precisaremos de outra solução (ScraperAPI, VPS, etc)\n');
+    console.log('💔 Railway está na blacklist do Magazine Luiza.');
+    console.log('🔄 Precisaremos de outra solução (ScraperAPI, VPS residencial, etc)\n');
     results.verdict = 'BLOCKED';
-  } else if (someBlocked) {
-    console.log('⚠️ ALGUNS TESTES BLOQUEADOS');
-    console.log('🤔 Pode funcionar parcialmente, mas não é ideal.\n');
-    results.verdict = 'PARTIAL';
-  } else {
+  } else if (anySuccess && !someBlocked) {
     console.log('✅ TODOS OS TESTES PASSARAM!');
-    console.log('🎉 Railway FUNCIONA! Pode migrar seu projeto!');
-    console.log('🚀 O IP do Railway não está bloqueado!\n');
+    console.log('🎉 Railway FUNCIONA! Pode migrar seu projeto!\n');
     results.verdict = 'SUCCESS';
+  } else {
+    console.log('⚠️ RESULTADO PARCIAL - alguns bloqueados, alguns OK.');
+    console.log('🔍 Verifique os detalhes acima para decidir.\n');
+    results.verdict = 'PARTIAL';
   }
 
   console.log(`🌐 IP deste servidor: ${results.publicIP || 'desconhecido'}`);
